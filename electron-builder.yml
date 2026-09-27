@@ -4,6 +4,7 @@ copyright: Copyright © 2026 商单管家
 
 directories:
   output: release
+  buildResources: build
 
 files:
   - 'out/**/*'
@@ -17,6 +18,7 @@ asarUnpack:
   - node_modules/better-sqlite3/**/*
 
 mac:
+  icon: build/icon.icns
   artifactName: ${productName}-${version}-${os}-${arch}.${ext}
   category: public.app-category.productivity
   target:
@@ -24,6 +26,7 @@ mac:
     - target: zip
 
 win:
+  icon: build/icon.ico
   artifactName: ${productName}-${version}-${os}-${arch}.${ext}
   target:
     - target: nsis

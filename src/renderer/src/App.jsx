@@ -19,6 +19,7 @@ import Finance from './components/Finance'
 import SettingsView from './components/Settings'
 import OrderForm from './components/OrderForm'
 import { toast } from 'sonner'
+import appIcon from './assets/icon.png'
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState('dashboard')
@@ -81,9 +82,7 @@ export default function App() {
         {/* Window controls padding on Mac + Logo */}
         <div className="pt-8 px-6 pb-6 border-b drag-region">
           <div className="flex items-center space-x-3 no-drag">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
-              <ReceiptText className="h-5 w-5" />
-            </div>
+            <img src={appIcon} alt="App Icon" className="h-9 w-9 rounded-lg shadow-sm object-contain" />
             <div>
               <div className="font-semibold text-base leading-tight tracking-tight flex items-center gap-1.5">
                 商单管家

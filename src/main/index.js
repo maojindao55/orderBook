@@ -12,6 +12,8 @@ function createWindow() {
     ? join(__dirname, '../preload/index.mjs')
     : join(__dirname, '../preload/index.js')
 
+  const iconPath = join(__dirname, '../../build/icon.png')
+
   mainWindow = new BrowserWindow({
     width: 1240,
     height: 820,
@@ -21,6 +23,7 @@ function createWindow() {
     backgroundColor: '#ffffff',
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 16, y: 12 },
+    ...(fs.existsSync(iconPath) ? { icon: iconPath } : {}),
     webPreferences: {
       preload: preloadPath,
       sandbox: false
