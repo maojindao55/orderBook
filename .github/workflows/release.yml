@@ -1,0 +1,157 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag to rebuild or publish (for example, v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Create draft release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "${{ env.RELEASE_TAG }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release create "${{ env.RELEASE_TAG }}" \
+              --repo "${{ github.repository }}" \
+              --title "商单管家 ${{ env.RELEASE_TAG }}" \
+              --draft \
+              --generate-notes
+          fi
+
+  build:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            builder_args: --mac --arm64
+            assets: |
+              OrderBook_macOS-Apple-Silicon-__VERSION__.dmg|*.dmg
+              OrderBook_macOS-Apple-Silicon-__VERSION__.zip|*.zip
+          - platform: macos-latest
+            builder_args: --mac --x64
+            assets: |
+              OrderBook_macOS-Intel-__VERSION__.dmg|*.dmg
+              OrderBook_macOS-Intel-__VERSION__.zip|*.zip
+          - platform: windows-latest
+            builder_args: --win --x64
+            assets: |
+              OrderBook_Windows_x64-__VERSION__.exe|*.exe
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Import macOS signing certificate
+        if: matrix.platform == 'macos-latest'
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: bash scripts/import-macos-csc-cert.sh
+
+      - name: Build Electron app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.platform == 'macos-latest' && secrets.CSC_LINK != '' && 'true' || 'false' }}
+        run: |
+          npm run build
+          npx electron-builder ${{ matrix.builder_args }} --publish never
+
+      - name: Upload renamed assets (Unix / macOS)
+        if: matrix.platform != 'windows-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          version_suffix="v$(node -p "require('./package.json').version")"
+          while IFS='|' read -r asset_name find_pattern; do
+            if [ -z "$asset_name" ]; then
+              continue
+            fi
+            asset_name="${asset_name//__VERSION__/$version_suffix}"
+            FILE=$(find release -name "$find_pattern" -type f | head -1)
+            if [ -z "$FILE" ]; then
+              echo "No artifact matching $find_pattern found"
+              find release -type f || true
+              exit 1
+            fi
+            cp "$FILE" "$asset_name"
+            gh release upload "${{ env.RELEASE_TAG }}" "$asset_name" \
+              --repo "${{ github.repository }}" --clobber
+          done <<'ASSETS'
+          ${{ matrix.assets }}
+          ASSETS
+
+      - name: Upload renamed assets (Windows)
+        if: matrix.platform == 'windows-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $appVersion = (Get-Content package.json | ConvertFrom-Json).version
+          $assets = @"
+          ${{ matrix.assets }}
+          "@ -split "`n"
+          foreach ($asset in $assets) {
+            if ([string]::IsNullOrWhiteSpace($asset)) {
+              continue
+            }
+            $parts = $asset.Trim().Split("|")
+            $assetName = $parts[0]
+            $assetName = $assetName.Replace("__VERSION__", "v$appVersion")
+            $findPattern = $parts[1]
+            $file = Get-ChildItem -Path release -Recurse -Filter $findPattern | Select-Object -First 1
+            if (-not $file) {
+              Write-Error "No artifact matching $findPattern found"
+              Get-ChildItem -Path release -Recurse -File
+              exit 1
+            }
+            Copy-Item $file.FullName $assetName
+            gh release upload "${{ env.RELEASE_TAG }}" $assetName `
+              --repo "${{ github.repository }}" --clobber
+          }
+
+  publish-release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ env.RELEASE_TAG }}" \
+            --repo "${{ github.repository }}" \
+            --draft=false \
+            --latest

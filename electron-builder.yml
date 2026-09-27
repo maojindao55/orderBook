@@ -1,0 +1,33 @@
+appId: com.orderbook.app
+productName: 商单管家
+copyright: Copyright © 2026 商单管家
+
+directories:
+  output: release
+
+files:
+  - 'out/**/*'
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.*'
+  - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+
+asarUnpack:
+  - node_modules/better-sqlite3/**/*
+
+mac:
+  artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+    - target: zip
+
+win:
+  artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+  target:
+    - target: nsis
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
