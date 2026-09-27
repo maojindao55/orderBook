@@ -86,6 +86,26 @@ npm run build
 npx electron-builder
 ```
 
+### 🚀 自动化版本发布（与 FreeBuddy 对齐）
+
+项目内置了自动化版本发布脚本，一键完成版本号自增、更新 CHANGELOG.md、提交 git commit、打 Tag 并推送触发 GitHub Actions：
+
+```bash
+# 自动递增补丁版本并发布 (v1.0.0 -> v1.0.1)
+npm run release
+# 或使用快捷命令
+npm run r
+
+# 发布 minor 次版本 (v1.0.0 -> v1.1.0)
+npm run release:minor
+
+# 发布 major 主版本 (v1.0.0 -> v2.0.0)
+npm run release:major
+
+# 演练模式（仅预览改动，不实际提交）
+npm run release -- --dry-run
+```
+
 ---
 
 ## 📄 开源许可
