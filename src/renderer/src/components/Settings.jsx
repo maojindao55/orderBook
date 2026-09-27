@@ -9,7 +9,11 @@ import {
   FileSpreadsheet,
   ShieldCheck,
   Sparkles,
+  RefreshCw,
+  DownloadCloud,
+  ExternalLink,
 } from 'lucide-react'
+import { useUpdaterStore } from '../store/updaterStore'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from './ui/card'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
@@ -17,6 +21,16 @@ import { Separator } from './ui/separator'
 import { toast } from 'sonner'
 
 export default function Settings() {
+  const {
+    appVersion,
+    latestVersion,
+    status,
+    downloadPercent,
+    errorMessage,
+    checkForUpdates,
+    quitAndInstall,
+  } = useUpdaterStore()
+
   const [stats, setStats] = useState({
     totalOrders: 0,
     brandsCount: 0,
@@ -189,6 +203,113 @@ export default function Settings() {
               数据受保护
             </Badge>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Auto Update Section */}
+      <Card className="border shadow-sm">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                <DownloadCloud className="h-4 w-4" />
+              </div>
+              <div>
+                <CardTitle className="text-base font-semibold">软件热更新与版本检查</CardTitle>
+                <CardDescription className="text-xs">
+                  自动检查 GitHub Releases 最新版本并支持后台静默下载与平滑更新
+                </CardDescription>
+              </div>
+            </div>
+            <Badge variant="outline" className="text-xs">
+              当前版本 {appVersion}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-lg border bg-muted/20 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 font-medium text-foreground">
+                <span>更新状态：</span>
+                {status === 'checking' && (
+                  <span className="text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                    <RefreshCw className="h-3 w-3 animate-spin" />
+                    正在检查最新版本...
+                  </span>
+                )}
+                {status === 'available' && (
+                  <span className="text-amber-600 dark:text-amber-400">
+                    发现新版本 {latestVersion}，正在下载...
+                  </span>
+                )}
+                {status === 'downloading' && (
+                  <span className="text-primary font-semibold">
+                    正在下载新版本 ({downloadPercent}%)
+                  </span>
+                )}
+                {status === 'downloaded' && (
+                  <span className="text-emerald-600 font-semibold flex items-center gap-1">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    新版本 {latestVersion} 已下载完毕，准备就绪！
+                  </span>
+                )}
+                {status === 'not-available' && (
+                  <span className="text-emerald-600 flex items-center gap-1">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    当前已是最新版本 ({latestVersion || appVersion})
+                  </span>
+                )}
+                {status === 'idle' && (
+                  <span className="text-muted-foreground">空闲（系统启动时会自动静默检测）</span>
+                )}
+                {status === 'error' && (
+                  <span className="text-destructive">{errorMessage || '检查更新失败'}</span>
+                )}
+              </div>
+              <p className="text-muted-foreground text-[11px]">
+                基于 GitHub Releases 自动化分发，支持增量下载与一键重启生效。
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {status === 'downloaded' ? (
+                <Button
+                  size="sm"
+                  onClick={quitAndInstall}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 h-8 text-xs font-medium"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  立即重启生效
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={status === 'checking' || status === 'downloading'}
+                  onClick={checkForUpdates}
+                  className="gap-1.5 h-8 text-xs font-medium"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${status === 'checking' ? 'animate-spin' : ''}`} />
+                  {status === 'checking' ? '正在检查...' : '检查新版本'}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {status === 'downloading' && (
+            <div className="space-y-1.5">
+              <div className="flex justify-between text-[11px] text-muted-foreground">
+                <span>下载进度</span>
+                <span>{downloadPercent}%</span>
+              </div>
+              <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-primary h-2 transition-all duration-300 rounded-full"
+                  style={{ width: `${downloadPercent}%` }}
+                />
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

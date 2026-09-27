@@ -18,10 +18,13 @@ import OrderList from './components/OrderList'
 import Finance from './components/Finance'
 import SettingsView from './components/Settings'
 import OrderForm from './components/OrderForm'
+import UpdateNotifier from './components/UpdateNotifier'
+import { useUpdaterStore } from './store/updaterStore'
 import { toast } from 'sonner'
 import appIcon from './assets/icon.png'
 
 export default function App() {
+  const { appVersion, init: initUpdater } = useUpdaterStore()
   const [currentTab, setCurrentTab] = useState('dashboard')
   const [orderModalOpen, setOrderModalOpen] = useState(false)
   const [editingOrder, setEditingOrder] = useState(null)
@@ -38,6 +41,10 @@ export default function App() {
       localStorage.setItem('theme', 'light')
     }
   }, [darkMode])
+
+  useEffect(() => {
+    initUpdater()
+  }, [initUpdater])
 
   const navItems = [
     { id: 'dashboard', label: '数据看板', icon: LayoutDashboard },
@@ -86,7 +93,7 @@ export default function App() {
             <div>
               <div className="font-semibold text-base leading-tight tracking-tight flex items-center gap-1.5">
                 商单管家
-                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">v1.0</Badge>
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{appVersion}</Badge>
               </div>
               <p className="text-xs text-muted-foreground mt-0.5">自媒体商单财务管理</p>
             </div>
@@ -199,6 +206,9 @@ export default function App() {
           window.dispatchEvent(new Event('refreshData'))
         }}
       />
+
+      {/* Floating Update Notifier */}
+      <UpdateNotifier />
     </div>
   )
 }

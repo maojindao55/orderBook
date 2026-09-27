@@ -4,6 +4,7 @@ import fs from 'fs'
 import * as xlsx from 'xlsx'
 import dbFuncs from './database.js'
 import { importExcelFile } from './importExcel.js'
+import { initAutoUpdater, registerUpdaterIpc } from './updater.js'
 
 let mainWindow;
 
@@ -53,8 +54,10 @@ function createWindow() {
 
 app.whenReady().then(() => {
   dbFuncs.initDatabase(app.getPath('userData'))
-  
+  registerUpdaterIpc()
+
   createWindow()
+  initAutoUpdater()
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

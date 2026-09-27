@@ -114,6 +114,51 @@ jobs:
           ${{ matrix.assets }}
           ASSETS
 
+      - name: Upload macOS update metadata (per-arch latest-mac.yml)
+        if: matrix.platform == 'macos-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          tag="${{ env.RELEASE_TAG }}"
+          repo="${{ github.repository }}"
+          version_suffix="v$(node -p "require('./package.json').version")"
+          arm_dmg="OrderBook_macOS-Apple-Silicon-${version_suffix}.dmg"
+          arm_zip="OrderBook_macOS-Apple-Silicon-${version_suffix}.zip"
+          x64_dmg="OrderBook_macOS-Intel-${version_suffix}.dmg"
+          x64_zip="OrderBook_macOS-Intel-${version_suffix}.zip"
+          yml=$(find release -name latest-mac.yml -type f | head -1)
+          if [ -z "$yml" ]; then
+            echo "No latest-mac.yml found; skipping"
+            exit 0
+          fi
+          sed -i.bak \
+            -e "s#商单管家-[0-9]\{1,\}\.[0-9]\{1,\}\.[0-9]\{1,\}-mac-arm64\.dmg#${arm_dmg}#g" \
+            -e "s#商单管家-[0-9]\{1,\}\.[0-9]\{1,\}\.[0-9]\{1,\}-mac-x64\.dmg#${x64_dmg}#g" \
+            -e "s#商单管家-[0-9]\{1,\}\.[0-9]\{1,\}\.[0-9]\{1,\}-mac-arm64\.zip#${arm_zip}#g" \
+            -e "s#商单管家-[0-9]\{1,\}\.[0-9]\{1,\}\.[0-9]\{1,\}-mac-x64\.zip#${x64_zip}#g" \
+            "$yml"
+          if echo "${{ matrix.builder_args }}" | grep -q -- '--arm64'; then
+            arch_tag="arm64"
+          else
+            arch_tag="x64"
+          fi
+          cp "$yml" "latest-mac-${arch_tag}.yml"
+          gh release upload "$tag" "latest-mac-${arch_tag}.yml" \
+            --repo "$repo" --clobber
+          zip_blockmap=$(find release -name "*.zip.blockmap" -type f | head -1)
+          if [ -n "$zip_blockmap" ]; then
+            if [ "$arch_tag" = "arm64" ]; then
+              cp "$zip_blockmap" "${arm_zip}.blockmap"
+              gh release upload "$tag" "${arm_zip}.blockmap" \
+                --repo "$repo" --clobber
+            else
+              cp "$zip_blockmap" "${x64_zip}.blockmap"
+              gh release upload "$tag" "${x64_zip}.blockmap" \
+                --repo "$repo" --clobber
+            fi
+          fi
+
       - name: Upload renamed assets (Windows)
         if: matrix.platform == 'windows-latest'
         env:
@@ -143,8 +188,70 @@ jobs:
               --repo "${{ github.repository }}" --clobber
           }
 
-  publish-release:
+      - name: Upload Windows update metadata (latest.yml)
+        if: matrix.platform == 'windows-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $tag = "${{ env.RELEASE_TAG }}"
+          $repo = "${{ github.repository }}"
+          $appVersion = (Get-Content package.json | ConvertFrom-Json).version
+          $windowsAssetName = "OrderBook_Windows_x64-v$appVersion.exe"
+          $yml = Get-ChildItem -Path release -Recurse -Filter latest.yml | Select-Object -First 1
+          if (-not $yml) {
+            Write-Host "No latest.yml found; skipping update metadata upload"
+            exit 0
+          }
+          $content = Get-Content $yml.FullName -Raw
+          $content = $content -replace '商单管家-[0-9]+\.[0-9]+\.[0-9]+-win-x64\.exe', $windowsAssetName
+          Set-Content -Path latest.yml -Value $content -NoNewline
+          gh release upload $tag latest.yml --repo $repo --clobber
+          $blockmap = Get-ChildItem -Path release -Recurse -Filter *.exe.blockmap | Select-Object -First 1
+          if ($blockmap) {
+            Copy-Item $blockmap.FullName "$windowsAssetName.blockmap"
+            gh release upload $tag "$windowsAssetName.blockmap" --repo $repo --clobber
+          }
+
+  merge-mac-metadata:
     needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Merge per-arch latest-mac.yml into latest-mac.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ env.RELEASE_TAG }}"
+          repo="${{ github.repository }}"
+          mkdir -p _mac_meta
+          gh release download "$tag" --repo "$repo" \
+            --dir _mac_meta \
+            --pattern 'latest-mac-arm64.yml' \
+            --pattern 'latest-mac-x64.yml' || true
+          if [ ! -f _mac_meta/latest-mac-arm64.yml ] && [ ! -f _mac_meta/latest-mac-x64.yml ]; then
+            echo "No per-arch mac yml found; skipping merge"
+            exit 0
+          fi
+          node scripts/merge-mac-latest-yml.mjs \
+            _mac_meta/latest-mac-arm64.yml \
+            _mac_meta/latest-mac-x64.yml \
+            latest-mac.yml
+          gh release upload "$tag" latest-mac.yml --repo "$repo" --clobber
+
+  publish-release:
+    needs: [build, merge-mac-metadata]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

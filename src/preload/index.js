@@ -22,4 +22,19 @@ contextBridge.exposeInMainWorld('api', {
   // Import/Export
   importExcel: () => ipcRenderer.invoke('db:importExcel'),
   exportExcel: (filters) => ipcRenderer.invoke('db:exportExcel', filters),
+
+  // Updater
+  updater: {
+    getVersion: () => ipcRenderer.invoke('app:getVersion'),
+    check: () => ipcRenderer.invoke('updater:check'),
+    download: () => ipcRenderer.invoke('updater:download'),
+    quitAndInstall: () => ipcRenderer.invoke('updater:quitAndInstall'),
+    openReleasesPage: () => ipcRenderer.invoke('updater:openReleasesPage'),
+    onEvent: (callback) => {
+      const channel = 'updater://event'
+      const listener = (_event, data) => callback(data)
+      ipcRenderer.on(channel, listener)
+      return () => ipcRenderer.removeListener(channel, listener)
+    }
+  }
 })

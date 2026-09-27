@@ -17,6 +17,11 @@ files:
 asarUnpack:
   - node_modules/better-sqlite3/**/*
 
+publish:
+  - provider: github
+    owner: maojindao55
+    repo: orderBook
+
 afterPack: scripts/after-pack.mjs
 
 mac:
