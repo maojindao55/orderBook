@@ -1,0 +1,225 @@
+#!/usr/bin/env node
+// Cross-platform release runner matching FreeBuddy.
+// Syncs version numbers → updates CHANGELOG → commits → tags → pushes to origin.
+
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import readline from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
+import { fileURLToPath } from 'node:url';
+
+import {
+  bumpVersion,
+  hasOnlyAllowedWorkingTreeChange,
+  validateSemver,
+  parseReleaseArgs,
+  RELEASE_HELP
+} from './release-lib.mjs';
+import {
+  formatChangelogSection,
+  formatReleaseNotes,
+  groupCommitSubjects,
+  prependChangelogSection
+} from './changelog-lib.mjs';
+
+const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+process.chdir(rootDir);
+
+function git(args, opts = {}) {
+  return execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], ...opts });
+}
+
+function gitQuiet(args) {
+  git(args, { stdio: 'ignore' });
+}
+
+function getRepositoryRelativePath(filePath) {
+  if (!filePath) return '';
+  const relativePath = path.relative(rootDir, path.resolve(rootDir, filePath));
+  if (!relativePath || relativePath.startsWith('..') || path.isAbsolute(relativePath)) return '';
+  return relativePath.split(path.sep).join('/');
+}
+
+function getLatestTag() {
+  const out = git(['tag', '-l', 'v[0-9]*.[0-9]*.[0-9]*', '--sort=-v:refname'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const latest = out.split(/\r?\n/).find((l) => l.trim().length > 0);
+  return latest || '';
+}
+
+function getCommitSubjectsSince(tag) {
+  const range = tag ? `${tag}..HEAD` : 'HEAD';
+  return git(['log', '--no-merges', '--format=%s', range], { stdio: ['ignore', 'pipe', 'ignore'] })
+    .split(/\r?\n/)
+    .filter(Boolean);
+}
+
+function readReleaseNotes(notesFile, latestTag) {
+  if (notesFile) {
+    const notesPath = path.resolve(rootDir, notesFile);
+    if (!fs.existsSync(notesPath)) {
+      throw new Error(`找不到变更说明文件: ${notesFile}`);
+    }
+    const notes = fs.readFileSync(notesPath, 'utf8').trim();
+    if (!notes) throw new Error(`变更说明文件为空: ${notesFile}`);
+    return notes;
+  }
+
+  const notes = formatReleaseNotes(groupCommitSubjects(getCommitSubjectsSince(latestTag)));
+  return notes || '### 其他更新\n\n- 常规维护与稳定性改进';
+}
+
+function updateChangelog(version, notes) {
+  const changelogPath = path.join(rootDir, 'CHANGELOG.md');
+  const existing = fs.existsSync(changelogPath)
+    ? fs.readFileSync(changelogPath, 'utf8')
+    : '# Changelog\n';
+  const date = new Date().toISOString().slice(0, 10);
+  const section = formatChangelogSection({ version, date, notes });
+  fs.writeFileSync(changelogPath, prependChangelogSection(existing, section));
+}
+
+function updateVersionFiles(version) {
+  const writeJson = (filePath, value) =>
+    fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+
+  const packageJsonPath = path.join(rootDir, 'package.json');
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+  packageJson.version = version;
+  writeJson(packageJsonPath, packageJson);
+
+  const packageLockPath = path.join(rootDir, 'package-lock.json');
+  if (fs.existsSync(packageLockPath)) {
+    const packageLock = JSON.parse(fs.readFileSync(packageLockPath, 'utf8'));
+    if ('version' in packageLock) packageLock.version = version;
+    if (packageLock.packages && packageLock.packages['']) packageLock.packages[''].version = version;
+    writeJson(packageLockPath, packageLock);
+  }
+}
+
+async function confirm(question) {
+  const rl = readline.createInterface({ input, output });
+  try {
+    const reply = await rl.question(question);
+    return /^[Yy]$/.test(reply.trim());
+  } finally {
+    rl.close();
+  }
+}
+
+function run(steps, dryRun) {
+  for (const [label, fn] of steps) {
+    if (dryRun) {
+      console.log(`[dry-run] ${label}`);
+    } else {
+      console.log(`→ ${label}`);
+      fn();
+    }
+  }
+}
+
+async function main() {
+  const opts = parseReleaseArgs(process.argv.slice(2));
+  if (opts.help) {
+    process.stdout.write(RELEASE_HELP);
+    process.exit(0);
+  }
+
+  // 前置检查
+  try {
+    git(['rev-parse', '--git-dir'], { stdio: 'ignore' });
+  } catch {
+    console.error('当前目录不是 git 仓库');
+    process.exit(1);
+  }
+
+  const porcelain = git(['status', '--porcelain=v1', '-z'], { stdio: ['ignore', 'pipe', 'ignore'] });
+  if (porcelain.length > 0 && !hasOnlyAllowedWorkingTreeChange(porcelain, getRepositoryRelativePath(opts.notesFile))) {
+    console.error('工作区有未提交的改动，请先 commit 或 stash：');
+    console.error(git(['status', '--short']));
+    process.exit(1);
+  }
+
+  const currentBranch = git(['branch', '--show-current'], { stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  if (currentBranch !== 'main') {
+    console.warn(`警告: 当前分支是 '${currentBranch}'，通常应在 main 分支发布`);
+    if (!opts.skipConfirm && !opts.dryRun) {
+      if (!(await confirm('是否继续? [y/N] '))) process.exit(1);
+    }
+  }
+
+  gitQuiet(['fetch', 'origin', '--tags', '--quiet']);
+
+  const latestTag = getLatestTag();
+  const latestVersion = latestTag ? latestTag.replace(/^v/, '') : '0.0.0';
+  const newVersion = opts.explicitVersion || bumpVersion(latestVersion, opts.bumpType);
+  validateSemver(newVersion);
+  const newTag = `v${newVersion}`;
+
+  try {
+    git(['rev-parse', newTag], { stdio: 'ignore' });
+    console.error(`tag ${newTag} 已存在`);
+    process.exit(1);
+  } catch {
+    /* tag does not exist — expected */
+  }
+
+  if (newVersion === latestVersion) {
+    console.error(`新版本与最新 tag 相同: ${newVersion}`);
+    process.exit(1);
+  }
+
+  const releaseNotes = readReleaseNotes(opts.notesFile, latestTag);
+
+  console.log('');
+  console.log('🚀 商单管家 发布预览');
+  console.log(`  当前最新 tag : ${latestTag || '无'}`);
+  console.log(`  新版本号     : ${newVersion}`);
+  console.log(`  新 tag       : ${newTag}`);
+  console.log(`  当前分支     : ${currentBranch}`);
+  console.log('  将更新文件   : package.json, package-lock.json, CHANGELOG.md');
+  console.log('');
+  console.log('📝 变更说明预览：');
+  console.log(releaseNotes);
+  console.log('');
+
+  if (!opts.skipConfirm && !opts.dryRun) {
+    if (!(await confirm(`确认发布 ${newTag}? [y/N] `))) {
+      console.log('已取消发布');
+      process.exit(0);
+    }
+  }
+
+  const filesToAdd = ['package.json', 'CHANGELOG.md'];
+  if (fs.existsSync(path.join(rootDir, 'package-lock.json'))) {
+    filesToAdd.push('package-lock.json');
+  }
+
+  const steps = [
+    [`git add ${filesToAdd.join(' ')}`, () => gitQuiet(['add', ...filesToAdd])],
+    [`git commit -m "chore: release ${newTag}"`, () => gitQuiet(['commit', '-m', `chore: release ${newTag}`])],
+    [`git tag ${newTag}`, () => gitQuiet(['tag', newTag])],
+    [`git push origin ${currentBranch}`, () => gitQuiet(['push', 'origin', currentBranch])],
+    [`git push origin ${newTag}`, () => gitQuiet(['push', 'origin', newTag])]
+  ];
+
+  if (opts.dryRun) {
+    console.log(`[dry-run] 将更新 ${filesToAdd.join(', ')} → ${newVersion}`);
+    run(steps, true);
+    console.log('');
+    console.log('[dry-run] 演练完成，未实际修改仓库。');
+  } else {
+    updateVersionFiles(newVersion);
+    updateChangelog(newVersion, releaseNotes);
+    run(steps, false);
+    console.log('');
+    console.log(`🎉 发布成功: ${newTag}`);
+    console.log('GitHub Actions 正在自动打包并发布 macOS / Windows 安装包及热更新元数据：');
+    console.log('👉 查看流水线进度: https://github.com/maojindao55/orderBook/actions');
+  }
+}
+
+main().catch((err) => {
+  console.error(err?.message || err);
+  process.exit(1);
+});
