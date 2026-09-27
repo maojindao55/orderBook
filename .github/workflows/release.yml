@@ -147,11 +147,27 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
       - name: Publish release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release edit "${{ env.RELEASE_TAG }}" \
-            --repo "${{ github.repository }}" \
+          tag="${{ env.RELEASE_TAG }}"
+          repo="${{ github.repository }}"
+          notes_file="release-notes.md"
+          
+          if [ -f .github/release-installation.md ]; then
+            sed "s/{{version}}/${tag}/g" .github/release-installation.md > "$notes_file"
+          else
+            echo "商单管家 ${tag}" > "$notes_file"
+          fi
+
+          gh release edit "$tag" \
+            --repo "$repo" \
+            --notes-file "$notes_file" \
             --draft=false \
             --latest

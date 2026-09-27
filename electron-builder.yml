@@ -17,10 +17,15 @@ files:
 asarUnpack:
   - node_modules/better-sqlite3/**/*
 
+afterPack: scripts/after-pack.mjs
+
 mac:
   icon: build/icon.icns
   artifactName: ${productName}-${version}-${os}-${arch}.${ext}
   category: public.app-category.productivity
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
   target:
     - target: dmg
     - target: zip
