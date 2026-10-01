@@ -1,5 +1,9 @@
-import * as xlsx from 'xlsx'
+import xlsxPkg from 'xlsx'
 import { normalizeBrandAndNote } from './brandNormalizer'
+
+// xlsx 是 CJS 包：在 ESM 语义的打包产物里 `import * as xlsx` 拿不到具名导出
+// （readFile 为 undefined），用 default import + 回退保证各环境下都可用
+const xlsx = xlsxPkg?.default ?? xlsxPkg
 
 function excelDateToJSDate(serial) {
   if (typeof serial === 'number') {
@@ -32,13 +36,35 @@ function parseStatus(statusStr) {
   return { status: '待结款', remark: s };
 }
 
+// 把底层的文件读取错误翻译成用户能看懂的提示
+function describeFileReadError(err, filePath) {
+  const code = err && err.code;
+  if (code === 'EPERM' || code === 'EACCES' || code === 'EBUSY') {
+    return `文件被占用，无法读取：${filePath}。请关闭 Excel / WPS 后重试。`;
+  }
+  if (code === 'ENOENT') {
+    return `找不到文件：${filePath}。文件可能已被移动、重命名或删除。`;
+  }
+  const detail = err && err.message ? err.message : String(err);
+  return `读取 Excel 文件失败：${detail}`;
+}
+
+function emptyImportResult() {
+  return { imported: 0, skippedDuplicate: 0, skippedEmpty: 0, errors: [] };
+}
+
 function importExcelFile(db, filePath) {
-  let imported = 0;
-  let errors = [];
-  
+  const result = emptyImportResult();
+
+  let workbook;
   try {
-    const workbook = xlsx.readFile(filePath);
-    
+    workbook = xlsx.readFile(filePath);
+  } catch (err) {
+    result.errors.push(describeFileReadError(err, filePath));
+    return result;
+  }
+
+  try {
     const checkDuplicate = db.prepare('SELECT id FROM orders WHERE brand_name = ? AND note = ? AND publish_date = ?');
     const insertStmt = db.prepare(`
       INSERT INTO orders (brand_name, note, publish_date, amount, status, settlement_date, contact_pr, account_name, remark)
@@ -47,24 +73,24 @@ function importExcelFile(db, filePath) {
 
     const processRow = (row, mappingOverrides) => {
       let { brand_name, note, publish_date, amount, statusStr, settlement_date, contact_pr, account_name } = row;
-      
+
       if (mappingOverrides) {
         brand_name = mappingOverrides.brand_name || brand_name;
         statusStr = mappingOverrides.statusStr !== undefined ? mappingOverrides.statusStr : statusStr;
       }
 
-      if (!brand_name) return; // Skip empty brand
+      if (!brand_name) { result.skippedEmpty++; return; } // Skip empty brand
 
       const normalized = normalizeBrandAndNote(brand_name, note);
       brand_name = normalized.brand;
       note = normalized.note;
 
-      if (!brand_name) return;
+      if (!brand_name) { result.skippedEmpty++; return; }
 
       const parsedStatus = parseStatus(statusStr);
       let pDate = publish_date ? excelDateToJSDate(publish_date) : null;
       let sDate = settlement_date ? excelDateToJSDate(settlement_date) : null;
-      
+
       let amt = parseFloat(amount);
       if (isNaN(amt)) amt = 0;
 
@@ -84,10 +110,12 @@ function importExcelFile(db, filePath) {
         const exists = checkDuplicate.get(record.brand_name, record.note, record.publish_date);
         if (!exists) {
           insertStmt.run(record);
-          imported++;
+          result.imported++;
+        } else {
+          result.skippedDuplicate++;
         }
       } catch (err) {
-        errors.push(`Error inserting row for ${record.brand_name}: ${err.message}`);
+        result.errors.push(`写入 [${record.brand_name}] 时失败：${err.message}`);
       }
     };
 
@@ -102,7 +130,7 @@ function importExcelFile(db, filePath) {
           publish_date: row['发布日期'],
           amount: row['金额'],
           statusStr: row['结款时间'],
-          settlement_date: row['结款时间'], 
+          settlement_date: row['结款时间'],
           contact_pr: row['对接pr']
         });
       });
@@ -119,7 +147,7 @@ function importExcelFile(db, filePath) {
           publish_date: row['发布日期'],
           amount: row['金额'],
           statusStr: '已结款',
-          settlement_date: row['结款时间'], 
+          settlement_date: row['结款时间'],
           contact_pr: row['对接pr']
         });
       });
@@ -140,12 +168,12 @@ function importExcelFile(db, filePath) {
         });
       });
     }
-    
+
   } catch (err) {
-    errors.push(`Failed to read Excel file: ${err.message}`);
+    result.errors.push(`解析 Excel 文件失败：${err.message}`);
   }
-  
-  return { imported, errors };
+
+  return result;
 }
 
-export { importExcelFile }
+export { importExcelFile, describeFileReadError, emptyImportResult }
