@@ -1,6 +1,6 @@
 {
   "name": "order-book",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "自媒体商单结款管理系统",
   "author": "maojindao55 <hobby0524@gmail.com>",
   "main": "./out/main/index.js",

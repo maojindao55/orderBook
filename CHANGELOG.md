@@ -2,6 +2,17 @@
 
 All notable changes to 商单管家 (OrderBook) will be documented in this file.
 
+## [1.0.1] - 2026-10-01
+
+### 新功能
+
+- add automated release scripts matching freebuddy
+- implement auto-updater and hot update mechanism matching freebuddy
+
+### 问题修复
+
+- 修复 xlsx 导入互操作并透出真实错误
+
 ## [1.0.0] - 2026-09-27
 
 ### 新功能
