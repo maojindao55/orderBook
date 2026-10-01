@@ -1,7 +1,9 @@
 import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import fs from 'fs'
-import * as xlsx from 'xlsx'
+import xlsxPkg from 'xlsx'
+// xlsx 是 CJS 包：防御性导入，兼容 ESM/CJS 各种互操作（见 importExcel.js 注释）
+const xlsx = xlsxPkg?.default ?? xlsxPkg
 import dbFuncs from './database.js'
 import { importExcelFile } from './importExcel.js'
 import { initAutoUpdater, registerUpdaterIpc } from './updater.js'
@@ -104,7 +106,7 @@ handleIPC('db:importExcel', async () => {
     properties: ['openFile']
   });
 
-  if (canceled || filePaths.length === 0) return { imported: 0, errors: [] };
+  if (canceled || filePaths.length === 0) return { imported: 0, skippedDuplicate: 0, skippedEmpty: 0, errors: [] };
 
   const db = dbFuncs.getDB();
   return importExcelFile(db, filePaths[0]);

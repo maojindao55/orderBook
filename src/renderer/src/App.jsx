@@ -62,8 +62,18 @@ export default function App() {
       toast.loading('正在选择并解析 Excel 文件...', { id: 'import-excel' })
       const res = await window.api.importExcel()
       if (res && res.imported !== undefined) {
-        toast.success(`成功导入 ${res.imported} 条商单数据！`, { id: 'import-excel' })
-        window.dispatchEvent(new Event('refreshData'))
+        if (res.errors && res.errors.length > 0) {
+          toast.error(`导入失败：${res.errors[0]}`, { id: 'import-excel', duration: 8000 })
+        } else {
+          const dup = res.skippedDuplicate || 0
+          toast.success(
+            dup > 0
+              ? `成功导入 ${res.imported} 条商单数据，跳过重复 ${dup} 条`
+              : `成功导入 ${res.imported} 条商单数据！`,
+            { id: 'import-excel' }
+          )
+          window.dispatchEvent(new Event('refreshData'))
+        }
       } else {
         toast.dismiss('import-excel')
       }
